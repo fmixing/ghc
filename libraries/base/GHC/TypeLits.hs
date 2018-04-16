@@ -36,7 +36,7 @@ module GHC.TypeLits
   , type (N.<=), type (N.<=?), type (N.+), type (N.*), type (N.^), type (N.-)
   , type N.Div, type N.Mod, type N.Log2
   , AppendSymbol
-  , N.CmpNat, CmpSymbol
+  , N.CmpNat, CmpSymbol, CmpTypeNonDet
 
   -- * User-defined type errors
   , TypeError
@@ -45,7 +45,7 @@ module GHC.TypeLits
   ) where
 
 import GHC.Base(Eq(..), Ord(..), Ordering(..), otherwise)
-import GHC.Types( Nat, Symbol )
+import GHC.Types( Nat, Symbol, Type )
 import GHC.Num(Integer, fromInteger)
 import GHC.Base(String)
 import GHC.Show(Show(..))
@@ -128,6 +128,8 @@ instance Read SomeSymbol where
 --
 -- @since 4.7.0.0
 type family CmpSymbol (m :: Symbol) (n :: Symbol) :: Ordering
+
+type family CmpTypeNonDet (m :: Type) (n :: Type) :: Ordering
 
 -- | Concatenation of type-level symbols.
 --
