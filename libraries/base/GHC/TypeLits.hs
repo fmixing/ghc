@@ -45,7 +45,7 @@ module GHC.TypeLits
   ) where
 
 import GHC.Base(Eq(..), Ord(..), Ordering(..), otherwise)
-import GHC.Types( Nat, Symbol, Type )
+import GHC.Types( Nat, Symbol )
 import GHC.Num(Integer, fromInteger)
 import GHC.Base(String)
 import GHC.Show(Show(..))
@@ -129,7 +129,7 @@ instance Read SomeSymbol where
 -- @since 4.7.0.0
 type family CmpSymbol (m :: Symbol) (n :: Symbol) :: Ordering
 
-type family CmpTypeNonDet (m :: Type) (n :: Type) :: Ordering
+type family CmpTypeNonDet (m :: k1) (n :: k2) :: Ordering
 
 -- | Concatenation of type-level symbols.
 --

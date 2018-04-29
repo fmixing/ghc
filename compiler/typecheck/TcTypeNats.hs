@@ -24,6 +24,7 @@ module TcTypeNats
 
 import GhcPrelude
 
+import Var        ( binderVar )
 import Type
 import Pair
 import TcType     ( TcType, tcEqType )
@@ -34,7 +35,7 @@ import TcRnTypes  ( Xi )
 import CoAxiom    ( CoAxiomRule(..), BuiltInSynFamily(..), TypeEqn )
 import Name       ( Name, BuiltInSyntax(..) )
 import TysWiredIn
-import TysPrim    ( mkTemplateAnonTyConBinders )
+import TysPrim    ( mkTemplateAnonTyConBinders, mkTemplateKindTyConBinders )
 import PrelNames  ( gHC_TYPELITS
                   , gHC_TYPENATS
                   , typeNatAddTyFamNameKey
@@ -297,7 +298,7 @@ typeSymbolCmpTyCon =
 typeTypeCmpTyCon :: TyCon
 typeTypeCmpTyCon =
   mkFamilyTyCon name
-    (mkTemplateAnonTyConBinders [ liftedTypeKind, liftedTypeKind ])
+    (binders ++ (mkTemplateAnonTyConBinders [ input_kind1, input_kind2 ]))
     orderingKind
     Nothing
     (BuiltInSynFamTyCon ops)
@@ -311,6 +312,9 @@ typeTypeCmpTyCon =
     , sfInteractTop   = interactTopCmpType
     , sfInteractInert = \_ _ _ _ -> []
     }
+  binders@[kv1, kv2] = mkTemplateKindTyConBinders [ liftedTypeKind, liftedTypeKind ]
+  input_kind1 = mkTyVarTy (binderVar kv1)
+  input_kind2 = mkTyVarTy (binderVar kv2)
 
 typeSymbolAppendTyCon :: TyCon
 typeSymbolAppendTyCon = mkTypeSymbolFunTyCon2 name
