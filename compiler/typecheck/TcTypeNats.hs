@@ -35,7 +35,7 @@ import TcRnTypes  ( Xi )
 import CoAxiom    ( CoAxiomRule(..), BuiltInSynFamily(..), TypeEqn )
 import Name       ( Name, BuiltInSyntax(..) )
 import TysWiredIn
-import TysPrim    ( mkTemplateAnonTyConBinders, mkTemplateKindTyConBinders )
+import TysPrim    ( mkTemplateAnonTyConBinders, mkTemplateKindTyConBinders, mkTemplateTyConBinders )
 import PrelNames  ( gHC_TYPELITS
                   , gHC_TYPENATS
                   , typeNatAddTyFamNameKey
@@ -58,6 +58,7 @@ import qualified Data.Map as Map
 import Data.Maybe ( isJust )
 import Control.Monad ( guard )
 import Data.List  ( isPrefixOf, isSuffixOf )
+import Outputable (Outputable, ppr, showSDocUnsafe, pprTrace)
 
 {-
 Note [Type-level literals]
@@ -298,7 +299,8 @@ typeSymbolCmpTyCon =
 typeTypeCmpTyCon :: TyCon
 typeTypeCmpTyCon =
   mkFamilyTyCon name
-    (binders ++ (mkTemplateAnonTyConBinders [ input_kind1, input_kind2 ]))
+    -- (mkTemplateAnonTyConBinders [ liftedTypeKind, liftedTypeKind ])
+    binders
     orderingKind
     Nothing
     (BuiltInSynFamTyCon ops)
@@ -312,9 +314,7 @@ typeTypeCmpTyCon =
     , sfInteractTop   = interactTopCmpType
     , sfInteractInert = \_ _ _ _ -> []
     }
-  binders@[kv1, kv2] = mkTemplateKindTyConBinders [ liftedTypeKind, liftedTypeKind ]
-  input_kind1 = mkTyVarTy (binderVar kv1)
-  input_kind2 = mkTyVarTy (binderVar kv2)
+  binders = mkTemplateTyConBinders [ liftedTypeKind, liftedTypeKind ] (\ks -> ks)
 
 typeSymbolAppendTyCon :: TyCon
 typeSymbolAppendTyCon = mkTypeSymbolFunTyCon2 name
@@ -759,8 +759,8 @@ matchFamCmpSymbol _ = Nothing
 
 matchFamCmpType :: [Type] -> Maybe (CoAxiomRule, [Type], Type)
 matchFamCmpType [s,t]
-  | tcEqType s t = Just (axCmpTypeRefl, [s], ordering EQ)
-  | otherwise = Just (axCmpTypeDef, [s,t], ordering (nonDetCmpType s t))
+  | tcEqType s t = pprTrace "EQ" (ppr s) (Just (axCmpTypeRefl, [s], ordering EQ))
+  | otherwise = pprTrace "Not eq" (ppr s) (Just (axCmpTypeDef, [s,t], ordering (nonDetCmpType s t)))
 matchFamCmpType _ = Nothing
 
 matchFamAppendSymbol :: [Type] -> Maybe (CoAxiomRule, [Type], Type)
