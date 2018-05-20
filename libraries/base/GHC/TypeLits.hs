@@ -36,7 +36,7 @@ module GHC.TypeLits
   , type (N.<=), type (N.<=?), type (N.+), type (N.*), type (N.^), type (N.-)
   , type N.Div, type N.Mod, type N.Log2
   , AppendSymbol
-  , N.CmpNat, CmpSymbol
+  , N.CmpNat, CmpSymbol, CmpTypeNonDet, MySet
 
   -- * User-defined type errors
   , TypeError
@@ -128,6 +128,10 @@ instance Read SomeSymbol where
 --
 -- @since 4.7.0.0
 type family CmpSymbol (m :: Symbol) (n :: Symbol) :: Ordering
+
+type family CmpTypeNonDet (m :: k1) (n :: k2) :: Ordering
+
+type family MySet (xs :: [k]) :: [k]
 
 -- | Concatenation of type-level symbols.
 --

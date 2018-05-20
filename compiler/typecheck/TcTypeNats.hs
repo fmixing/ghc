@@ -18,11 +18,14 @@ module TcTypeNats
   , typeNatLogTyCon
   , typeNatCmpTyCon
   , typeSymbolCmpTyCon
+  , typeTypeCmpTyCon
+  , typeSetTyCon
   , typeSymbolAppendTyCon
   ) where
 
 import GhcPrelude
 
+import Var        ( binderVar )
 import Type
 import Pair
 import TcType     ( TcType, tcEqType )
@@ -33,7 +36,7 @@ import TcRnTypes  ( Xi )
 import CoAxiom    ( CoAxiomRule(..), BuiltInSynFamily(..), TypeEqn )
 import Name       ( Name, BuiltInSyntax(..) )
 import TysWiredIn
-import TysPrim    ( mkTemplateAnonTyConBinders )
+import TysPrim    ( mkTemplateAnonTyConBinders, mkTemplateKindTyConBinders, mkTemplateTyConBinders )
 import PrelNames  ( gHC_TYPELITS
                   , gHC_TYPENATS
                   , typeNatAddTyFamNameKey
@@ -46,7 +49,11 @@ import PrelNames  ( gHC_TYPELITS
                   , typeNatLogTyFamNameKey
                   , typeNatCmpTyFamNameKey
                   , typeSymbolCmpTyFamNameKey
+                  , typeTypeCmpTyFamNameKey
+                  , typeMySetTyFamNameKey
                   , typeSymbolAppendFamNameKey
+                  , hasKey
+                  , consDataConKey
                   )
 import FastString ( FastString
                   , fsLit, nilFS, nullFS, unpackFS, mkFastString, appendFS
@@ -54,7 +61,8 @@ import FastString ( FastString
 import qualified Data.Map as Map
 import Data.Maybe ( isJust )
 import Control.Monad ( guard )
-import Data.List  ( isPrefixOf, isSuffixOf )
+import Data.List  ( isPrefixOf, isSuffixOf, null, head )
+import Outputable (Outputable, ppr, showSDocUnsafe, pprTrace, pprPanic)
 
 {-
 Note [Type-level literals]
@@ -148,6 +156,8 @@ typeNatTyCons =
   , typeNatLogTyCon
   , typeNatCmpTyCon
   , typeSymbolCmpTyCon
+  , typeTypeCmpTyCon
+  , typeSetTyCon
   , typeSymbolAppendTyCon
   ]
 
@@ -291,6 +301,57 @@ typeSymbolCmpTyCon =
     , sfInteractInert = \_ _ _ _ -> []
     }
 
+typeTypeCmpTyCon :: TyCon
+typeTypeCmpTyCon =
+  mkFamilyTyCon name
+    -- (mkTemplateAnonTyConBinders [ liftedTypeKind, liftedTypeKind ])
+    binders
+    orderingKind
+    Nothing
+    (BuiltInSynFamTyCon ops)
+    Nothing
+    NotInjective
+  where
+  name = mkWiredInTyConName UserSyntax gHC_TYPELITS (fsLit "CmpTypeNonDet")
+                typeTypeCmpTyFamNameKey typeTypeCmpTyCon
+  ops = BuiltInSynFamily
+    { sfMatchFam      = matchFamCmpType
+    , sfInteractTop   = interactTopCmpType
+    , sfInteractInert = \_ _ _ _ -> []
+    }
+  binders = mkTemplateTyConBinders [ liftedTypeKind, liftedTypeKind ] (\ks -> ks)
+
+typeSetTyCon :: TyCon
+typeSetTyCon = 
+  mkFamilyTyCon name
+    -- (mkTemplateAnonTyConBinders [ liftedTypeKind, liftedTypeKind ])
+    binders
+    (listKind output_kind1)
+    Nothing
+    (BuiltInSynFamTyCon ops)
+    Nothing
+    NotInjective
+  where
+  name = mkWiredInTyConName UserSyntax gHC_TYPELITS (fsLit "MySet")
+                typeMySetTyFamNameKey typeSetTyCon
+  ops = BuiltInSynFamily
+    { sfMatchFam      = matchFamSet
+    , sfInteractTop   = \_ _ -> []
+    , sfInteractInert = \_ _ _ _ -> []
+    }
+  binders = mkTemplateTyConBinders [ liftedTypeKind ] (\ks -> map mkListTy ks)
+  output_kind1 = mkTyVarTy (binderVar $ head binders)
+
+
+-- mkTyConApp :: TyCon -> [Type] -> Type
+-- mkTyConApp tycon tys
+--   | isFunTyCon tycon
+--   , [_rep1,_rep2,ty1,ty2] <- tys
+--   = FunTy ty1 ty2
+
+--   | otherwise
+--   = TyConApp tycon tys
+
 typeSymbolAppendTyCon :: TyCon
 typeSymbolAppendTyCon = mkTypeSymbolFunTyCon2 name
   BuiltInSynFamily
@@ -352,6 +413,8 @@ axAddDef
   , axLeqDef
   , axCmpNatDef
   , axCmpSymbolDef
+  , axCmpTypeDef
+  , axSetDef
   , axAppendSymbolDef
   , axAdd0L
   , axAdd0R
@@ -365,6 +428,8 @@ axAddDef
   , axLeqRefl
   , axCmpNatRefl
   , axCmpSymbolRefl
+  , axCmpTypeRefl
+  , axSetEmpty
   , axLeq0L
   , axSubDef
   , axSub0R
@@ -403,6 +468,23 @@ axCmpSymbolDef =
            t2' <- isStrLitTy t2
            return (mkTyConApp typeSymbolCmpTyCon [s1,t1] ===
                    ordering (compare s2' t2')) }
+
+axCmpTypeDef = CoAxiomRule
+    { coaxrName      = fsLit "CmpTypeDef"
+    , coaxrAsmpRoles = [Nominal, Nominal]
+    , coaxrRole      = Nominal
+    , coaxrProves    = \cs ->
+        do [Pair s1 s2, Pair t1 t2] <- return cs
+           return (mkTyConApp typeTypeCmpTyCon [s1,t1] ===
+                   ordering (nonDetCmpType s2 t2)) }
+
+axSetDef = CoAxiomRule
+    { coaxrName      = fsLit "SetDef"
+    , coaxrAsmpRoles = [Nominal]
+    , coaxrRole      = Nominal
+    , coaxrProves    = \cs ->
+        do [Pair s1 s2] <- return cs
+           return (mkTyConApp typeSetTyCon [s1] === makeListType s2 (sort $ extractPromotedList s2)) }
 
 axAppendSymbolDef = CoAxiomRule
     { coaxrName      = fsLit "AppendSymbolDef"
@@ -449,6 +531,10 @@ axCmpNatRefl    = mkAxiom1 "CmpNatRefl"
                 $ \(Pair s _) -> (cmpNat s s) === ordering EQ
 axCmpSymbolRefl = mkAxiom1 "CmpSymbolRefl"
                 $ \(Pair s _) -> (cmpSymbol s s) === ordering EQ
+axCmpTypeRefl = mkAxiom1 "CmpTypeRefl"
+                $ \(Pair s _) -> (cmpType s s) === ordering EQ
+axSetEmpty  = mkAxiom1 "SetEmpty"
+            $ \(Pair s _) -> (set s) === makeListType s []
 axLeq0L     = mkAxiom1 "Leq0L"    $ \(Pair s _) -> (num 0 <== s) === bool True
 axAppendSymbol0R  = mkAxiom1 "Concat0R"
             $ \(Pair s t) -> (mkStrLitTy nilFS `appendSymbol` s) === t
@@ -466,6 +552,8 @@ typeNatCoAxiomRules = Map.fromList $ map (\x -> (coaxrName x, x))
   , axLeqDef
   , axCmpNatDef
   , axCmpSymbolDef
+  , axCmpTypeDef
+  , axSetDef
   , axAppendSymbolDef
   , axAdd0L
   , axAdd0R
@@ -479,6 +567,8 @@ typeNatCoAxiomRules = Map.fromList $ map (\x -> (coaxrName x, x))
   , axLeqRefl
   , axCmpNatRefl
   , axCmpSymbolRefl
+  , axCmpTypeRefl
+  , axSetEmpty
   , axLeq0L
   , axSubDef
   , axSub0R
@@ -524,6 +614,12 @@ cmpNat s t = mkTyConApp typeNatCmpTyCon [s,t]
 cmpSymbol :: Type -> Type -> Type
 cmpSymbol s t = mkTyConApp typeSymbolCmpTyCon [s,t]
 
+cmpType :: Type -> Type -> Type
+cmpType s t = mkTyConApp typeTypeCmpTyCon [s,t]
+
+set :: Type -> Type
+set s = mkTyConApp typeSetTyCon [(makeListType s $ extractPromotedList s)]
+
 appendSymbol :: Type -> Type -> Type
 appendSymbol s t = mkTyConApp typeSymbolAppendTyCon [s, t]
 
@@ -548,12 +644,24 @@ isBoolLitTy tc =
 orderingKind :: Kind
 orderingKind = mkTyConApp orderingTyCon []
 
+listKind :: Kind -> Kind
+listKind l = mkTyConApp listTyCon [l]
+
 ordering :: Ordering -> Type
 ordering o =
   case o of
     LT -> mkTyConApp promotedLTDataCon []
     EQ -> mkTyConApp promotedEQDataCon []
     GT -> mkTyConApp promotedGTDataCon []
+
+makeListType :: Type ->[Type] -> Type
+makeListType list_ty o = do 
+  let Just (tc, list) = splitTyConApp_maybe list_ty
+  mkPromotedListTy (head list) o
+  -- case o of
+  --   [] -> mkTyConApp promotedNilDataCon []
+  --   (x : xs) -> mkTyConApp promotedConsDataCon []
+    -- mkPromotedListTy k [Type]
 
 isOrderingLitTy :: Type -> Maybe Ordering
 isOrderingLitTy tc =
@@ -713,6 +821,21 @@ matchFamCmpSymbol [s,t]
         mbY = isStrLitTy t
 matchFamCmpSymbol _ = Nothing
 
+matchFamCmpType :: [Type] -> Maybe (CoAxiomRule, [Type], Type)
+matchFamCmpType [_, _, s,t]
+  | tcEqType s t = pprTrace "EQ" (ppr s) (Just (axCmpTypeRefl, [s], ordering EQ))
+  | otherwise = pprTrace "Not eq" (ppr s) (Just (axCmpTypeDef, [s,t], ordering (nonDetCmpType s t)))
+matchFamCmpType _ = Nothing
+
+matchFamSet :: [Type] -> Maybe (CoAxiomRule, [Type], Type)
+matchFamSet [_, s]
+  | null $ extractPromotedList s = pprTrace "Empty" (ppr s) (Just (axSetEmpty, [s], makeListType s $ extractPromotedList s))
+  | otherwise = do
+    let extracted = extractPromotedList s
+    let list_ty = makeListType s $ sort $ extractPromotedList s
+    pprTrace "Extracted" (ppr extracted) (Just (axSetDef, [s], pprTrace "List_ty" (ppr list_ty) list_ty))
+matchFamSet a = pprTrace "Something strange happened" (ppr a) Nothing
+
 matchFamAppendSymbol :: [Type] -> Maybe (CoAxiomRule, [Type], Type)
 matchFamAppendSymbol [s,t]
   | Just x <- mbX, nullFS x = Just (axAppendSymbol0R, [t], t)
@@ -831,6 +954,11 @@ interactTopCmpSymbol :: [Xi] -> Xi -> [Pair Type]
 interactTopCmpSymbol [s,t] r
   | Just EQ <- isOrderingLitTy r = [ s === t ]
 interactTopCmpSymbol _ _ = []
+
+interactTopCmpType :: [Xi] -> Xi -> [Pair Type]
+interactTopCmpType [s,t] r
+  | Just EQ <- isOrderingLitTy r = [ s === t ]
+interactTopCmpType _ _ = []
 
 interactTopAppendSymbol :: [Xi] -> Xi -> [Pair Type]
 interactTopAppendSymbol [s,t] r
@@ -990,3 +1118,38 @@ genLog x base = Just (exactLoop 0 x)
   underLoop s i
     | i < base  = s
     | otherwise = let s1 = s + 1 in s1 `seq` underLoop s1 (div i base)
+
+
+split :: [a] -> ([a], [a])
+split [] = ([], [])
+split [x] = ([x], [])
+split (x:y:xys) = (x:xs, y:ys) where (xs, ys) = split xys
+
+sort :: [Type] -> [Type]
+sort [x] = [x]
+sort [] = []
+sort arr = let (xs', ys') = split arr in merge (sort xs') (sort ys')
+  where
+    merge xs [] = xs
+    merge [] ys = ys
+    merge (x:xs) (y:ys) = 
+        case nonDetCmpType x y of
+            GT -> y : merge (x : xs) ys
+            LT -> x : merge xs (y : ys)
+            EQ -> x : merge xs ys
+
+-- | Extract the elements of a promoted list. Panics if the type is not a
+-- promoted list
+extractPromotedList :: Type    -- ^ The promoted list
+                    -> [Type]
+extractPromotedList tys = go tys
+  where
+    go list_ty
+      | Just (tc, [_k, t, ts]) <- splitTyConApp_maybe list_ty
+      = t : go ts
+
+      | Just (tc, [_k]) <- splitTyConApp_maybe list_ty
+      = []
+
+      | otherwise
+      = pprPanic "extractPromotedList" (ppr tys)
